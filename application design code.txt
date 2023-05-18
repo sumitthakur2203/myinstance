@@ -1,0 +1,260 @@
+resource "google_compute_network" "vpc-network" {
+  name = "eu-sd-network"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "vpc-subnet" {
+  name = "eu-sub-vt-tf"
+  region = "europe-north1"
+  ip_cidr_range = "10.50.25.0/24"
+  network = google_compute_network.vpc-network.name 
+  depends_on = [google_compute_network.vpc-network]
+}
+resource "google_compute_instance" "vm_name1" {
+    name = "eu-web-vt-tf"
+    zone = "europe-north1-c"
+    machine_type = "n1-standard-1"
+    boot_disk {
+      initialize_params {
+          image = "debian-cloud/debian-11"
+      }
+    }
+
+    network_interface {
+      network = google_compute_network.vpc-network.name
+      subnetwork = google_compute_subnetwork.vpc-subnet.name
+    }
+    metadata_startup_script = "#! /bin/bash apt update apt -y install apache2 cat <<EOF > /var/www/html/index.html <html><body><p><h1>Welcome to Europe Server 1!!!</h1></p></body></html> EOF"
+    depends_on = [google_compute_subnetwork.vpc-subnet]
+  
+}
+
+resource "google_compute_instance" "vm_name2" {
+    name = "eu-web-vt-tf"
+    zone = "europe-north1-b"
+    machine_type = "e2-medium"
+    boot_disk {
+      initialize_params {
+          image = "debian-cloud/debian-11"
+      }
+    }
+
+    network_interface {
+      network = google_compute_network.vpc-network.name
+      subnetwork = google_compute_subnetwork.vpc-subnet.name
+    }
+
+    metadata_startup_script = "#! /bin/bash apt update apt -y install apache2 cat <<EOF > /var/www/html/index.html <html><body><p><h1>Welcome to Europe Server 2!!!</h1></p></body></html> EOF"
+    depends_on = [google_compute_subnetwork.vpc-subnet]
+  
+}
+resource "google_compute_firewall" "firewall_rule1" {
+  name = "ssh-pro-vt-tf"
+  network = google_compute_network.vpc-network.name
+  allow {
+    protocol = "tcp"
+    ports = ["22"]
+  }
+  source_tags = [ "web" ]
+}
+
+resource "google_compute_firewall" "firewall_rule2" {
+  name = "http-pro-vt-tf"
+  network = google_compute_network.vpc-network.name
+  allow {
+    protocol = "tcp"
+    ports = ["80"]
+  }
+  source_tags = [ "web" ]
+}
+
+resource "google_compute_firewall" "firewall_rule3" {
+  name = "https-pro-vt-tf"
+  network = google_compute_network.vpc-network.name
+  allow {
+    protocol = "tcp"
+    ports = ["443"]
+  }
+  source_tags = [ "web" ]
+}
+resource "google_compute_backend_service" "backend_service" {
+  name               = "lb-back-vt-tf"
+  port_name          = "http"
+  protocol           = "HTTP"
+  timeout_sec        = 10
+  enable_cdn         = false
+  session_affinity   = "NONE"
+  health_checks         = [google_compute_http_health_check.health_check.id]
+  //region = "europe-north1"
+  //network = google_compute_network.vpc-network.id
+  depends_on = [google_compute_instance.vm_name1, google_compute_instance.vm_name2]
+
+  backend {
+    group = "${google_compute_instance_group.group1.self_link}"
+  }
+
+  backend {
+    group = "${google_compute_instance_group.group2.self_link}"
+  }
+}
+
+# Define the health check
+resource "google_compute_http_health_check" "health_check" {
+  name               = "demo-health2708"
+  request_path       = "/"
+  port               = 80
+  check_interval_sec = 10
+  timeout_sec        = 5
+}
+
+# Define the URL map
+resource "google_compute_url_map" "url_map" {
+  name        = "lb-vt-tf"
+  default_service = "${google_compute_backend_service.backend_service.self_link}"
+}
+
+# Define the HTTP proxy
+resource "google_compute_target_http_proxy" "http_proxy" {
+  name        = "http-proxy-vt-tf"
+  url_map     = "${google_compute_url_map.url_map.self_link}"
+}
+
+# Define the forwarding rule
+resource "google_compute_global_forwarding_rule" "forwarding_rule" {
+  name        = "fd-rule-vt-tf"
+  target      = "${google_compute_target_http_proxy.http_proxy.self_link}"
+  port_range  = "80"
+  ip_protocol = "TCP"
+}
+resource "google_compute_router" "router" {
+  name    = "eu-root-vt-tf"
+  region  = google_compute_subnetwork.vpc-subnet.region
+  network = google_compute_network.vpc-network.id
+
+  bgp {
+    asn = 64514
+  }
+}
+
+resource "google_compute_router_nat" "nat" {
+  name                               = "eu-nat-vt-tf"
+  router                             = google_compute_router.router.name
+  region                             = google_compute_router.router.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = false
+    filter = "ERRORS_ONLY"
+  }
+  depends_on = [google_compute_subnetwork.vpc-subnet, google_compute_router.router]
+}
+resource "google_compute_global_address" "private_ip_address" {
+  name          = "pri-ip-vt-tf"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 24
+  network       = google_compute_network.vpc-network.id
+}
+
+resource "google_service_networking_connection" "private_vpc_connection" {
+  network                 = google_compute_network.vpc-network.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_ip_address.name]
+}
+resource "google_sql_database_instance" "instance" {
+  project = "starry-agency-378605"
+  name             = "eu-sql-vt-tf"
+  region           = "europe-north1"
+  database_version = "MYSQL_8_0"
+  deletion_protection = false
+  depends_on = [google_service_networking_connection.private_vpc_connection]
+  settings {
+    tier = "db-f1-micro"
+    availability_type = "REGIONAL"
+    ip_configuration {
+      ipv4_enabled                                  = false
+      private_network                               = google_compute_network.vpc-network.id
+      enable_private_path_for_google_cloud_services = true
+    }
+    backup_configuration{
+        binary_log_enabled= true
+        enabled = true
+    }
+  }
+}
+
+resource "google_compute_instance_group" "group1" {
+  name        = "eu-unique1-vt-tf"
+  description = "My unmanaged instance group"
+  zone = google_compute_instance.vm_name1.zone
+  network = google_compute_network.vpc-network.id
+  instances   = [google_compute_instance.vm_name1.self_link]
+  named_port {
+    name = "http"
+    port = 80
+  }
+  depends_on = [google_compute_instance.vm_name1]
+}
+
+resource "google_compute_instance_group" "group2" {
+  name        = "eu-unique2-vt-tf"
+  description = "My unmanaged instance group"
+  zone = google_compute_instance.vm_name2.zone
+  network = google_compute_network.vpc-network.id
+  instances   = [google_compute_instance.vm_name2.self_link]
+  named_port {
+    name = "http"
+    port = 80
+  }
+  depends_on = [google_compute_instance.vm_name2]
+}
+
+resource "google_compute_disk" "disk" {
+name = "diskvttf2203"
+size = 10
+type = "pd-ssd"
+zone = "europe-north1-c"
+}
+resource "google_compute_attached_disk" "diskt" {
+disk = google_compute_disk.disk.id
+instance = google_compute_instance.vm_name1.id
+}
+
+resource "google_filestore_instance" "instance" {
+name = "filestore-instance"
+location = "europe-north1-a"
+tier = "STANDARD"
+file_shares {
+capacity_gb = 1024
+name = "share1"
+}
+networks {
+network = google_compute_network.vpc-network.id
+modes = ["MODE_IPV4"]
+}
+}
+
+resource "google_filestore_backup" "backup" {
+     name = "tf-fs-bkup"
+     location = "europe-north1"
+     source_instance = google_filestore_instance.instance.id
+     source_file_share = "share1"
+     description = "This is a filestore backup for the test instance"
+ 
+ }
+
+ resource "google_compute_instance" "jumpserver" {
+name = "test-instance"
+zone = "europe-north1-a"
+machine_type = "e2-medium"
+boot_disk {
+initialize_params {
+image = "debian-cloud/debian-11"
+}
+}
+network_interface {
+network = google_compute_network.vpc-network.id
+subnetwork = google_compute_subnetwork.vpc-subnet.id
+}
+}
