@@ -1,9 +1,14 @@
-output "VM_name" {
-    value = google_compute_instance.vm.name
-}
-output "VM_machine_type" {
-    value = google_compute_instance.vm.machine_type
-}
-output "VM_zone" {
-    value = google_compute_instance.vm.zone
+resource "google_compute_instance" "vm" {
+  name = var.vm_name
+  zone = var.zone_name
+  machine_type = var.machine_type
+  boot_disk{
+    initialize_params{
+        image = var.image
+    }
+  }
+  network_interface{
+    network = var.network
+    subnetwork = var.subnetwork
+  }
 }
