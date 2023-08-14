@@ -9,6 +9,7 @@ resource "google_compute_instance" "vmtest" {
   }
   network_interface{
     network = var.network
-    subnetwork = var.subnetwork
+    access_config{
   }
+}
 }
