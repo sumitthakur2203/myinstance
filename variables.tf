@@ -13,6 +13,3 @@ variable "image" {
 variable "network" {
   type = any
 }
-variable "subnetwork" {
-  type = any
-}
