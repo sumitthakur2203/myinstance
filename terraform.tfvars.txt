@@ -1,0 +1,6 @@
+  vm_name = "terraform-instance"
+  zone_name = "us-central1-b"
+  machine_type = "n1-standard-1"
+  image = "kube-project-380713/rhel-7-hardened-custom-os-image"
+  network = "mynetwork"
+  subnetwork = "subnet1"
