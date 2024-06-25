@@ -1,0 +1,46 @@
+pipeline {
+    agent any 
+    tools {
+        maven 'maven' // Declare Maven as a tool
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/sumitthakur2203/java-maven-app.git'
+ 
+            }
+        }
+        stage('Build') { 
+            steps { // Wrap the script block in steps
+                script { 
+                    def mavenHome = tool name: 'maven', type: 'maven'
+                    def mavenCMD = "${mavenHome}/bin/mvn"
+                    sh "${mavenCMD} clean package" 
+                }
+            }
+        }
+             stage('SonarQube Analysis') { 
+            steps {
+                withSonarQubeEnv('sonar') { 
+                    sh '''
+                         mvn clean verify sonar:sonar \
+                        -Dsonar.projectKey=sonarqube \
+                        -Dsonar.host.url=http://34.78.246.194:9000\
+                        -Dsonar.login=sqp_3a29e8b053b43dfc50a8e637b99ae00cee0ed9a4
+                    '''
+                }
+            }
+        }
+        stage('emailnotification') {
+            steps {
+                script {
+                    if (currentBuild.result == 'SUCCESS') {
+                        emailext body: 'Build successful!',
+                                subject: 'Build Success Notification',
+                                to: 'thakursumit750@gmail.com'
+                    }
+                }
+            }
+        }
+    }
+}
