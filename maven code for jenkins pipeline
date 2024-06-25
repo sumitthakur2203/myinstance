@@ -1,0 +1,24 @@
+pipeline {
+    agent any 
+    tools {
+        maven 'maven' // Declare Maven as a tool
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: '
+https://github.com/sumitthakur2203/java-maven-app.git'
+ 
+            }
+        }
+        stage('Build') { 
+            steps { // Wrap the script block in steps
+                script { 
+                    def mavenHome = tool name: 'maven', type: 'maven'
+                    def mavenCMD = "${mavenHome}/bin/mvn"
+                    sh "${mavenCMD} clean package" 
+                }
+            }
+        }
+    }
+}
