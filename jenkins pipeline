@@ -1,0 +1,82 @@
+pipeline {
+    agent any 
+    tools {
+        maven 'maven'
+    }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/sumitthakur2203/java-maven-app.git'
+            }
+        }
+        stage('Build') { 
+            steps {
+                script {
+                    def mavenHome = tool name: 'maven', type: 'maven'
+                    def mavenCMD = "${mavenHome}/bin/mvn"
+                    sh "${mavenCMD} clean package" 
+                }
+            }
+        }
+        stage('SonarQube Analysis') { 
+            steps {
+                withSonarQubeEnv('sonar') { 
+                    sh '''
+                         mvn clean verify sonar:sonar \
+                         -Dsonar.projectKey=sonarqube1 \
+                         -Dsonar.host.url=http://35.205.224.118:9000 \
+                         -Dsonar.login=sqp_11d280eccef34ce100ed5c81ae6c38100ae93255
+                    '''
+                }
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // 1. Build the Docker Image
+                    sh 'docker build -t europe-west1-docker.pkg.dev/peak-axiom-426310-b1/jenkins-image-repo/my-app2:latest .'
+                }
+            }
+        }
+        stage('Trivy Scan') {
+            steps {
+                // Run Trivy analysis
+                sh 'trivy image europe-west1-docker.pkg.dev/peak-axiom-426310-b1/jenkins-image-repo/my-app2:latest > trivy_report.txt'
+            }
+        }
+        stage('Push Docker Image to GCR') {
+            steps {
+                // 2. Push the Image to Docker Hub
+                    sh 'gcloud auth configure-docker \
+                    europe-west1-docker.pkg.dev '// Use variables
+                    sh 'docker push europe-west1-docker.pkg.dev/peak-axiom-426310-b1/jenkins-image-repo/my-app2:latest'
+            }
+        }
+        stage('Run Docker Container') {
+            steps {
+                script {
+                    // 3. Run the Container
+                    sh 'docker run -d -p 8080:8080 europe-west1-docker.pkg.dev/peak-axiom-426310-b1/jenkins-image-repo/my-app2:latest'
+                }
+            }
+        }
+    }
+    post {
+        success {
+            // Actions to take if the pipeline succeeds
+            echo 'Pipeline succeeded!'
+            // You can also send an email notification on success
+            mail to: 'thakursumit750@gmail.com',
+                 subject: "Pipeline Succeeded: ${currentBuild.fullDisplayName}",
+                 body: "The pipeline ${env.BUILD_URL} has successfully completed."
+        }
+        failure {
+            // Actions to take if the pipeline fails
+            echo 'Pipeline failed!'
+            // You can also send an email notification on failure
+            mail to: 'thakursumit750@gmail.com',
+                 subject: "Pipeline Failed: ${currentBuild.fullDisplayName}",
+                 body: "The pipeline ${env.BUILD_URL} has failed. Check the logs for details."
+        }
+    }
+}
